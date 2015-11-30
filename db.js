@@ -10,7 +10,8 @@ const Conn = new Sequelize(
     '',  // password
     {
         dialect: 'postgres',
-        host: '127.0.0.1'
+        host: '127.0.0.1',
+        debug: false
     }
 );
 
@@ -46,19 +47,24 @@ const Post = Conn.define('post', {
 Person.hasMany(Post);
 Post.belongsTo(Person);
 
-Conn.sync({ force: true }).then(() => {
-    _.times(10, () => {
+/*Conn.sync({ force: true }).then(() => {
+    _.times(100, () => {
         return Person.create({
             firstName: Faker.name.firstName(),
             lastName: Faker.name.lastName(),
             email: Faker.internet.email()
         }).then(person => {
-            return person.createPost({
-                title: 'Un article de ' + person.lastName,
-                content: 'Super !'
-            });
+            const p = [];
+            for (let k = 0; k < 100; k++) {
+                p.push(person.createPost({
+                    title: 'Un article #' + k + ' de ' + person.lastName,
+                    content: 'Super !'
+                }));
+            }
+
+            return Promise.all(p);
         });
     });
-});
+});*/
 
 export default Conn;

@@ -257,7 +257,8 @@ const Query = new GraphQLObjectType({
             resolve: (root, args) => {
                 const query = {
                     where: _.without(args, ['first']),
-                    limit: 'first' in args ? args.first : null
+                    limit: 'first' in args ? args.first : 10//,
+                    //include: [Db.models.post] // fetch join
                 };
                 return getPersons(query);
             }
@@ -270,7 +271,7 @@ const Query = new GraphQLObjectType({
             resolve: (root, args) => {
                 const query = {
                     where: _.without(args, ['first']),
-                    limit: 'first' in args ? args.first : null
+                    limit: 'first' in args ? args.first : 10
                 };
                 return getPosts(query);
             }
