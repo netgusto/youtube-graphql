@@ -11,7 +11,8 @@ import {
 import {
   connectionArgs,
   connectionDefinitions,
-  connectionFromArray,
+
+//  connectionFromArray,
   fromGlobalId,
   globalIdField,
   mutationWithClientMutationId,
@@ -20,6 +21,10 @@ import {
 
 import Db from './db';
 import _ from 'lodash';
+
+function base64(i) { return new Buffer(i, 'ascii').toString('base64'); }
+
+function unbase64(i) { return new Buffer(i, 'base64').toString('ascii'); }
 
 const getPost = (id) => Db.models.post.findById(id);
 const getPosts = (query) => Db.models.post.findAll(query);
@@ -116,11 +121,90 @@ const Person = new GraphQLObjectType({
             description: 'The posts of this person.',
             args: connectionArgs,
             resolve: (person, args) => {
-                return person.getPosts().then(personPosts => {
-                    return connectionFromArray(
+
+                let dir = 'ASC';
+                let limit = 10;
+                if (args.last) {
+                    dir = 'DESC';
+                    limit = args.last;
+                } else if (args.first) {
+                    limit = args.first;
+                }
+
+                const decodeCursor = (cursorString) => JSON.parse(unbase64(cursorString));
+
+                const encodeCursor = (cursorData) => base64(JSON.stringify(cursorData));
+
+                let cursor = null;
+                let seek = null;
+
+                if (args.after) {
+                    cursor = decodeCursor(args.after);
+                    seek = {
+                        $or: [
+                          { createdAt: { $gt: cursor.date } },
+                          { $and: [
+                            { createdAt: { $eq: cursor.date } },
+                            { id: { $gt: cursor.id } }
+                          ]}
+                        ]
+                    };
+                } else if (args.before) {
+                    cursor = decodeCursor(args.before);
+                    seek = {
+                        $or: [
+                          { createdAt: { $lt: cursor.date } },
+                          { $and: [
+                              { createdAt: { $eq: cursor.date } },
+                              { id: { $lt: cursor.id } }
+                          ]}
+                        ]
+                    };
+                }
+
+                const query = {
+                    limit: limit,
+                    order: [['createdAt', dir], ['id', dir]],
+                    where: seek
+                };
+
+                return person.getPosts(query).then(personPosts => {
+                    let startCursor = null;
+                    let endCursor = null;
+                    const edges = personPosts.map(post => {
+                        const postCursor = encodeCursor({
+                            id: post.id,
+                            date: post.createdAt
+                        });
+
+                        if (startCursor === null) { startCursor = postCursor; }
+
+                        endCursor = postCursor;
+
+                        return {
+                            cursor: postCursor,
+                            node: post
+                        };
+                    });
+
+                    return {
+                        edges,
+                        pageInfo: {
+                            startCursor,
+                            endCursor,
+                            hasPreviousPage: false,
+                            hasNextPage: false
+                        }
+                    };
+                    /*
+                    console.log(connectionFromArray(
                         personPosts,
                         args
-                    );
+                    ));
+                    return connectionFromArray(
+                        personPosts, {}//,
+                        //args
+                    );*/
                 });
             }
         }
