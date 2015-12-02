@@ -1,8 +1,9 @@
 'use strict';
 
 import Sequelize from 'sequelize';
-import Faker from 'faker';
-import _ from 'lodash';
+
+//import Faker from 'faker';
+//import _ from 'lodash';
 
 const Conn = new Sequelize(
     'youtube-relaydb',      // db

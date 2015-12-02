@@ -1,8 +1,12 @@
 import {
     GraphQLObjectType,
-    GraphQLInt,
+
+    //GraphQLInt,
+
     GraphQLString,
-    GraphQLList,
+
+    //GraphQLList,
+
     GraphQLSchema,
     GraphQLNonNull,
     GraphQLID
@@ -20,11 +24,10 @@ import {
 } from 'graphql-relay';
 
 import Db from './db';
-import _ from 'lodash';
 
-function base64(i) { return new Buffer(i, 'ascii').toString('base64'); }
+//import _ from 'lodash';
 
-function unbase64(i) { return new Buffer(i, 'base64').toString('ascii'); }
+import { connectionFromPgSqlSchema } from './relay-pgsql';
 
 const getPost = (id) => Db.models.post.findById(id);
 const getPosts = (query) => Db.models.post.findAll(query);
@@ -76,24 +79,7 @@ const Post = new GraphQLObjectType({
     })
 });
 
-/**
- * We define a connection between a person and its posts.
- *
- * connectionType implements the following type system shorthand:
- *   type PostConnection {
- *     edges: [PostEdge]
- *     pageInfo: PageInfo!
- *   }
- *
- * connectionType has an edges field - a list of edgeTypes that implement the
- * following type system shorthand:
- *   type PostEdge {
- *     cursor: String!
- *     node: Post
- *   }
- */
-
-var { connectionType: postConnection } = connectionDefinitions({
+const { connectionType: postConnection } = connectionDefinitions({
     name: 'Post',
     nodeType: Post
 });
@@ -120,95 +106,18 @@ const Person = new GraphQLObjectType({
             type: postConnection,
             description: 'The posts of this person.',
             args: connectionArgs,
-            resolve: (person, args) => {
-
-                let dir = 'ASC';
-                let limit = 10;
-                if (args.last) {
-                    dir = 'DESC';
-                    limit = args.last;
-                } else if (args.first) {
-                    limit = args.first;
-                }
-
-                const decodeCursor = (cursorString) => JSON.parse(unbase64(cursorString));
-
-                const encodeCursor = (cursorData) => base64(JSON.stringify(cursorData));
-
-                let cursor = null;
-                let seek = null;
-
-                if (args.after) {
-                    cursor = decodeCursor(args.after);
-                    seek = {
-                        $or: [
-                          { createdAt: { $gt: cursor.date } },
-                          { $and: [
-                            { createdAt: { $eq: cursor.date } },
-                            { id: { $gt: cursor.id } }
-                          ]}
-                        ]
-                    };
-                } else if (args.before) {
-                    cursor = decodeCursor(args.before);
-                    seek = {
-                        $or: [
-                          { createdAt: { $lt: cursor.date } },
-                          { $and: [
-                              { createdAt: { $eq: cursor.date } },
-                              { id: { $lt: cursor.id } }
-                          ]}
-                        ]
-                    };
-                }
-
-                const query = {
-                    limit: limit,
-                    order: [['createdAt', dir], ['id', dir]],
-                    where: seek
-                };
-
-                return person.getPosts(query).then(personPosts => {
-                    let startCursor = null;
-                    let endCursor = null;
-                    const edges = personPosts.map(post => {
-                        const postCursor = encodeCursor({
-                            id: post.id,
-                            date: post.createdAt
-                        });
-
-                        if (startCursor === null) { startCursor = postCursor; }
-
-                        endCursor = postCursor;
-
-                        return {
-                            cursor: postCursor,
-                            node: post
-                        };
-                    });
-
-                    return {
-                        edges,
-                        pageInfo: {
-                            startCursor,
-                            endCursor,
-                            hasPreviousPage: false,
-                            hasNextPage: false
-                        }
-                    };
-                    /*
-                    console.log(connectionFromArray(
-                        personPosts,
-                        args
-                    ));
-                    return connectionFromArray(
-                        personPosts, {}//,
-                        //args
-                    );*/
-                });
-            }
+            resolve: (person, args) => connectionFromPgSqlSchema({
+                queryExecutor: person.getPosts.bind(person),
+                pivotColumn: 'createdAt',
+                args
+            })
         }
     })
+});
+
+const { connectionType: personConnection } = connectionDefinitions({
+    name: 'Person',
+    nodeType: Person
 });
 
 /*
@@ -287,31 +196,7 @@ var Mutation = new GraphQLObjectType({
 
 query {
 
-  people(first: 3) {
-    id
-    firstName
-    lastName
-    posts(first: 1) {
-
-      edges {
-        node {
-          id
-          ... on Post {
-            title
-          }
-        }
-      }
-
-      pageInfo {
-        startCursor
-        endCursor
-        hasNextPage
-        hasPreviousPage
-      }
-    }
-  }
-
-
+  tsup
 
   node(id: "UGVyc29uOjM=") {
     ... on Post {
@@ -323,6 +208,53 @@ query {
       lastName
     }
   }
+
+  posts(first: 10, after: "eyJpZCI6MjExLCJwaXZvdCI6IjIwMTUtMTItMDJUMDc6NTA6MjMuMDU1WiJ9") {
+    pageInfo {
+      startCursor
+      endCursor
+      hasNextPage
+      hasPreviousPage
+    }
+    edges {
+      node {
+        id
+        ... on Post {
+          title
+        }
+      }
+    }
+  }
+
+  people(first: 5) {
+    edges {
+      node {
+        id
+        ... on Person {
+          firstName
+          lastName
+          posts(last: 10) {
+
+            edges {
+              node {
+                id
+                ... on Post {
+                  title
+                }
+              }
+            }
+
+            pageInfo {
+              startCursor
+              endCursor
+              hasNextPage
+              hasPreviousPage
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 */
@@ -331,35 +263,34 @@ const Query = new GraphQLObjectType({
     name: 'RootQueryType',
     description: 'This is a root query',
     fields: {
+
+        tsup: {
+            type: GraphQLString,
+            resolve: () => 'Tsup !'
+        },
+
         people: {
-            type: new GraphQLList(Person),
-            args: {
-                id: { type: GraphQLInt },
-                email: { type: GraphQLString },
-                first: { type: GraphQLInt }
-            },
-            resolve: (root, args) => {
-                const query = {
-                    where: _.without(args, ['first']),
-                    limit: 'first' in args ? args.first : 10//,
-                    //include: [Db.models.post] // fetch join
-                };
-                return getPersons(query);
-            }
+            type: personConnection,
+            description: 'The people.',
+            args: connectionArgs,
+            resolve: (root, args) => connectionFromPgSqlSchema({
+                queryExecutor: getPersons,
+                pivotColumn: 'createdAt',
+                args
+            })
         },
+
         posts: {
-            type: new GraphQLList(Post),
-            args: {
-                first: { type: GraphQLInt }
-            },
-            resolve: (root, args) => {
-                const query = {
-                    where: _.without(args, ['first']),
-                    limit: 'first' in args ? args.first : 10
-                };
-                return getPosts(query);
-            }
+            type: postConnection,
+            description: 'The posts.',
+            args: connectionArgs,
+            resolve: (root, args) => connectionFromPgSqlSchema({
+                queryExecutor: getPosts,
+                pivotColumn: 'createdAt',
+                args
+            })
         },
+
         node: nodeField
     }
 });
